@@ -1,4 +1,3 @@
-# Robot_vaccum_monitor
 로봇청소기 편성 월간 취합 프로그램 (robot_vacuum_monitor.py)
 ==================================================
 
