@@ -16,7 +16,7 @@ HD(현대)/GS/CJ/LT(롯데) 4개 채널의 "로봇청소기" 편성만 걸러서
 참고: hsmoa.com, live.ecomm-data.com 도 후보로 검토했는데, hsmoa는 화면이 클라이언트
 에서 동적으로 그려지고 공개 JSON API가 바로 안 보였고, live.ecomm-data.com(라방바
 데이터랩)은 로그인/구독이 필요한 유료 분석 플랫폼이라 이번 버전에서는 제외했습니다.
-hdmzp가 담당자님이 말씀하신 것처럼 가장 안정적이라 이 사이트를 주축으로 삼았습니다.
+hdmzp가 가장 안정적이라 이 사이트를 주축으로 삼았습니다.
 
 [로봇청소기 판별 방법]
 1) 브랜드가 "로봇청소기 전문 브랜드" 목록(ROBOT_ONLY_BRANDS)에 있으면 무조건 포함
@@ -26,9 +26,25 @@ hdmzp가 담당자님이 말씀하신 것처럼 가장 안정적이라 이 사�
    "로봇"이라는 단어가 명시된 경우에만 포함 (예: 삼성전자, LG전자, 다이슨 등 —
    이런 브랜드는 로봇청소기 말고도 파는 게 많아서 이렇게 걸러야 함)
 3) 그 외 브랜드는 제품명에 "로봇"이 명시된 경우에만 포함 (안전망)
+4) 새벽 시간대(06:00 이전 시작)는 실제 판매 방송이 아니라 "조건형성용" 편성으로
+   보고 자동으로 제외합니다. (예: 새벽 03~04시대 반복 재방송, 05시대 방송 등)
+   기준 시각은 아래 CONDITIONING_CUTOFF 에서 조정할 수 있습니다.
 
 새로운 브랜드가 계속 나올 수 있으니, 목록에 없어서 빠진 게 있으면 아래
 ROBOT_ONLY_BRANDS / GENERIC_BRANDS 리스트에 브랜드명만 추가해주면 됩니다.
+
+[같은 시간대 방송 묶음 처리]
+같은 회사가 같은 날짜·같은 방송 형태(L/D)·같은 시작 시각에 방송하는 여러 제품은
+실제로는 한 방송에서 여러 제품을 같이 파는 것이지, 제품 수만큼 별도 방송을 한 게
+아닙니다. 그래서:
+  - 목록에서도 같은 시간대·같은 채널은 한 줄로만 표시하고, 그 시간에 같이 방송된
+    다른 품목이 더 있으면 "OO 외 N건" 형식으로 옆에 붙여줍니다.
+    (완전히 동일한 상품이 원본 데이터에 중복 등록된 경우는 "외 N건" 없이 그냥
+    한 줄로 합쳐집니다)
+  - 맨 아래 "채널별 방송 횟수" 요약도 (날짜, 회사, L/D, 시작시각)이 같으면 한
+    번으로 묶어서 집계합니다.
+  - 반면 "품목별 방송 횟수"는 각 제품이 몇 번 등장했는지 보는 것이라 (중복 등록된
+    것은 제외하고) 제품별로 개별 집계합니다.
 
 사용법:
     python robot_vacuum_monitor.py                  # 실행하면 "원하는 달을 입력하세요"라고 물어봄
@@ -67,7 +83,7 @@ WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 
 # --- 로봇청소기 브랜드 판별 목록 (필요하면 여기에 이름만 추가하세요) ---
 ROBOT_ONLY_BRANDS = {
-    "로보락", "드리미", "존알", "오로와", "나르왈", "에코백스", "타이탈", "아이닉", "유진로봇","roborock","dyson"
+    "로보락", "드리미", "존알", "오로와", "나르왈", "에코백스", "타이탈", "아이닉", "유진로봇","roborock"
 }
 GENERIC_BRANDS = {
     "삼성전자", "LG전자", "다이슨", "샤오미", "필립스", "테팔", "일렉트로룩스",
@@ -75,6 +91,10 @@ GENERIC_BRANDS = {
 # 제품명에 "로봇"이 들어가도 로봇청소기가 아닌 것들 (안마의자/헬스로봇/렌탈 등) — 여기에 있으면 무조건 제외
 EXCLUDE_KEYWORDS = ["안마의자", "헬스로봇", "렌탈"]
 EXCLUDE_CATEGORIES = {"일반렌탈"}
+
+# 새벽 시간대 방송은 "조건형성용" 편성(실제 판매 목적이 아닌 반복/테스트성 편성)으로 보고 제외
+# 이 시각 "이전"에 시작하는 방송은 제외됩니다 (예: 03:20, 05:30 → 제외 / 06:00 → 포함)
+CONDITIONING_CUTOFF = "06:00"
 
 # 회사/기관 네트워크 보안 프록시가 인증서를 가로채는 경우를 자동 우회하기 위한 플래그
 INSECURE_SSL = False
@@ -152,6 +172,13 @@ def is_robot_vacuum(brand: str, product: str, category: Optional[str] = None) ->
     return False
 
 
+def is_conditioning_broadcast(start: str) -> bool:
+    """새벽 시간대(조건형성용) 편성인지 판별. CONDITIONING_CUTOFF 이전 시작이면 True."""
+    if not start:
+        return False
+    return start < CONDITIONING_CUTOFF
+
+
 # --- 모델명 축약: 알려진 모델 코드 패턴을 우선 추출하고, 없으면 일반 규칙으로 축약 ---
 _MODEL_PATTERNS = [
     re.compile(r"S\d{1,2}\s*MaxV(?:\s*Ultra)?", re.IGNORECASE),
@@ -219,15 +246,32 @@ def collect_month(year_month: str) -> list[Entry]:
                     brand = (it.get("brand") or "").strip()
                     product = (it.get("product") or "").strip()
                     category = it.get("category")
+                    start = it.get("start", "")
                     if not product or not is_robot_vacuum(brand, product, category):
+                        continue
+                    if is_conditioning_broadcast(start):
                         continue
                     entries.append(Entry(
                         date=date_str, weekday=weekday, company=company, kind=kind,
-                        start=it.get("start", ""), end=it.get("end", ""),
+                        start=start, end=it.get("end", ""),
                         brand=brand, model=extract_model(brand, product),
                     ))
     entries.sort(key=lambda e: (e.date, e.start))
     return entries
+
+
+def _dedupe_entries(entries: list[Entry]) -> list[Entry]:
+    """같은 (날짜,회사,L/D,시작시각,모델)이 중복 레코드로 들어온 경우 첫 번째만 남긴다.
+    (원본 데이터에 동일 상품이 여러 건으로 중복 등록되어 있는 경우를 방지)"""
+    seen = set()
+    result = []
+    for e in entries:
+        key = (e.date, e.company, e.kind, e.start, e.model)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(e)
+    return result
 
 
 def format_report(year_month: str, entries: list[Entry]) -> str:
@@ -237,20 +281,42 @@ def format_report(year_month: str, entries: list[Entry]) -> str:
         lines.append("(해당 월에는 아직 로봇청소기 편성 데이터가 없습니다)")
         return "\n".join(lines)
 
+    entries = _dedupe_entries(entries)
+
+    # 같은 (날짜,회사,L/D,시작시각) 슬롯에 실제로 서로 다른 품목이 몇 개 같이 방송되는지 모아둔다
+    slot_models: dict = {}
+    for e in entries:
+        slot_key = (e.date, e.company, e.kind, e.start)
+        models = slot_models.setdefault(slot_key, [])
+        if e.model not in models:
+            models.append(e.model)
+
     current_date = None
+    rendered_slots = set()
     for e in entries:
         if e.date != current_date:
             current_date = e.date
             lines.append("")
             lines.append(f"[{e.date}({e.weekday})]")
+        slot_key = (e.date, e.company, e.kind, e.start)
+        if slot_key in rendered_slots:
+            continue  # 같은 슬롯은 한 줄로만 표시
+        rendered_slots.add(slot_key)
+        models = slot_models[slot_key]
         kind_label = KIND_LABEL.get(e.kind, e.kind)
-        lines.append(f"{e.company}({kind_label}) {e.model} {e.start}")
+        extra = len(models) - 1
+        if extra > 0:
+            lines.append(f"{e.company}({kind_label}) {models[0]} 외 {extra}건 {e.start}")
+        else:
+            lines.append(f"{e.company}({kind_label}) {models[0]} {e.start}")
 
     # --- 요약표: 채널별 방송 횟수 / 품목별 방송 횟수 ---
     lines.append("")
     lines.append("=" * 32)
     lines.append("■ 채널별 방송 횟수")
-    company_counts = Counter(e.company for e in entries)
+    company_counts = Counter()
+    for slot_key in slot_models:
+        company_counts[slot_key[1]] += 1
     for company in COMPANIES:
         count = company_counts.get(company, 0)
         if count:
